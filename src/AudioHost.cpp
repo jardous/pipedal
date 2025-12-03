@@ -1467,6 +1467,35 @@ public:
                                     this->pNotifyCallbacks->OnNotifyVusSubscription(*updates);
                                 }
                                 this->hostWriter.AckVuUpdate(); // please sir, can I have some more?
+
+                                if (this->alsaSequencer)
+                                    {
+                                        for (const auto &update : *updates) 
+                                        {
+                                            // Fix 1: Use instanceId_ (with underscore)
+                                            // Fix 2: Use the constants from Pedalboard class
+                                            bool isInput = (update.instanceId_ == Pedalboard::INPUT_VOLUME_ID); 
+                                            bool isOutput = (update.instanceId_ == Pedalboard::OUTPUT_VOLUME_ID);
+
+                                            if (isInput || isOutput)
+                                            {
+                                                // Fix 3: Calculate peak from the stereo output fields
+                                                // We use 'outputMaxValue' to see the signal level *after* the volume knob.
+                                                float linearValue = std::max(update.outputMaxValueL_, update.outputMaxValueR_);
+                                                
+                                                if (linearValue > 1.0f) linearValue = 1.0f;
+                                                
+                                                // Convert to MIDI (0-127)
+                                                uint8_t midiValue = (uint8_t)(linearValue * 127.0f);
+
+                                                int channel = 0; // MIDI Ch 1
+                                                int ccNumber = isInput ? 10 : 11; // CC 10 (Input) or CC 11 (Output)
+                                                
+                                                this->alsaSequencer->SendControlChange(channel, ccNumber, midiValue);
+                                            }
+                                        }
+                                    }
+
                             }
                             else if (command == RingBufferCommand::Lv2StateChanged)
                             {

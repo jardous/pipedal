@@ -326,6 +326,9 @@ namespace pipedal
         // A timeout of 0 returns immediately.
         virtual bool ReadMessage(AlsaMidiMessage &message, int timeoutMs = -1) = 0;
 
+        virtual void SendProgramChange(int channel, int program) = 0;
+        virtual void SendControlChange(int channel, int controller, int value) = 0;
+
         // currently non-functional
         virtual bool GetQueueRealtime(uint64_t *sec, uint32_t *nsec) = 0;
 

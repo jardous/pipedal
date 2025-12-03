@@ -65,6 +65,8 @@ namespace pipedal
             // Read a single MIDI message from the sequencer input port. A timeout of -1 blocks indefinitely.
             // A timeout of 0 returns immediately.
             virtual bool ReadMessage(AlsaMidiMessage &message, int timeoutMs = -1) override;
+            virtual void SendProgramChange(int channel, int program);
+            virtual void SendControlChange(int channel, int controller, int value) override;
 
             // Get current real-time from the queue (useful for calculating precise timing)
             virtual bool GetQueueRealtime(uint64_t *sec, uint32_t *nsec) override;
@@ -94,6 +96,7 @@ namespace pipedal
             std::vector<struct pollfd> pollFds; // For polling input events
             snd_seq_t *seqHandle = nullptr;
             int inPort = -1;
+            int outPort = -1;
             int queueId = -1; // Queue for real-time timestamps
         };
 
@@ -278,16 +281,26 @@ namespace pipedal
         snd_seq_set_client_name(seqHandle, "PiPedal");
 
         inPort = snd_seq_create_simple_port(seqHandle, "PiPedal:in",
-                                            SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE,
+                                            SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE
+                                            | SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
                                             SND_SEQ_PORT_TYPE_MIDI_GENERIC |
-                                                SND_SEQ_PORT_TYPE_MIDI_GM | SND_SEQ_PORT_TYPE_APPLICATION);
+                                            SND_SEQ_PORT_TYPE_MIDI_GM | SND_SEQ_PORT_TYPE_APPLICATION);
         if (inPort < 0)
         {
             // convert rc to message
             throw std::runtime_error(SS("Failed to open ALSA sequencer:" << snd_strerror(inPort)));
         }
         CreateRealtimeInputQueue();
-
+/*
+        outPort = snd_seq_create_simple_port(seqHandle, "PiPedal:out",
+                                             SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
+                                             SND_SEQ_PORT_TYPE_APPLICATION);
+        if (outPort < 0)
+        {
+            // convert rc to message
+            throw std::runtime_error(SS("Failed to open ALSA sequencer:" << snd_strerror(outPort)));
+        }
+*/
         snd_seq_nonblock(seqHandle, 1); // Set sequencer to non-blocking mode
 
         // Get our client and port numbers for reference
@@ -398,6 +411,57 @@ namespace pipedal
             }
         }
     }
+
+    void AlsaSequencerImpl::SendProgramChange(int channel, int program)
+    {
+        if (!seqHandle) return; // Safety check
+        snd_seq_event_t ev;
+        snd_seq_ev_clear(&ev);
+
+        // 1. Set the source (this application)
+        // Replace 'my_port_id' with the variable holding the port number (often just 0 or a member variable)
+        snd_seq_ev_set_source(&ev, inPort);
+
+        // 2. Broadcast to anyone connected to our output (The USB Device)
+        snd_seq_ev_set_subs(&ev); 
+
+        // 3. Send immediately (don't wait for a sequencer timer)
+        snd_seq_ev_set_direct(&ev);
+
+        // 4. Construct the Program Change Event
+        snd_seq_ev_set_pgmchange(&ev, channel, program);
+
+        // 5. Push it out
+        snd_seq_event_output(seqHandle, &ev);
+        snd_seq_drain_output(seqHandle);
+    }
+
+    void AlsaSequencerImpl::SendControlChange(int channel, int controller, int value) 
+    {
+        if (!seqHandle) return; // Safety check
+
+        snd_seq_event_t ev;
+        snd_seq_ev_clear(&ev);
+
+        // 1. Set source to our port
+        // We use 'inPort' because we configured it as a duplex port (READ/WRITE)
+        snd_seq_ev_set_source(&ev, inPort);
+
+        // 2. Broadcast to subscribers (your USB device)
+        snd_seq_ev_set_subs(&ev); 
+        snd_seq_ev_set_direct(&ev); // Send immediately
+
+        // 3. Construct Control Change Event
+        // channel: 0-15
+        // controller: 0-127 (e.g. 7 for Volume)
+        // value: 0-127
+        snd_seq_ev_set_controller(&ev, channel, controller, value);
+
+        // 4. Output
+        snd_seq_event_output(seqHandle, &ev);
+        snd_seq_drain_output(seqHandle);
+    }
+
     bool AlsaSequencerImpl::ReadMessage(AlsaMidiMessage &message, int timeoutMs)
     {
         // Event loop
