@@ -664,6 +664,7 @@ private:
         if (!realtimeVuBuffers->waitingForAcknowledge)
         {
             auto pResult = realtimeVuBuffers->GetResult(currentSample);
+            // this->alsaSequencer->SendControlChange(0, 7, 64); // dummy midi message to wake up host thread.
 
             this->realtimeWriter.SendVuUpdate(pResult);
             realtimeVuBuffers->waitingForAcknowledge = true;
@@ -1217,6 +1218,7 @@ private:
                         {
                             processMonitorPortSubscriptions(nframes);
                         }
+                        // this->alsaSequencer->SendControlChange(0, 6, 69); // dummy midi message to wake up host thread.
                     }
                     pedalboard->GatherPatchProperties(pParameterRequests);
                     pedalboard->GatherPathPatchProperties(this);
@@ -1344,7 +1346,10 @@ public:
             // check for overruns every 30 seconds.
             clock_duration waitPeriod =
                 std::chrono::duration_cast<clock_duration>(std::chrono::seconds(30));
-            clock_time waitTime = std::chrono::steady_clock::now();
+            clock_time waitTime = std::chrono::steady_clock::now();        // Timing info for MIDI VU and Program Change events.
+
+            // next time we can send MIDI VU levels.
+            std::chrono::steady_clock::time_point nextMidiOutVuSendTime_ = std::chrono::steady_clock::now();
 
             while (true)
             {
@@ -1468,7 +1473,14 @@ public:
                                 }
                                 this->hostWriter.AckVuUpdate(); // please sir, can I have some more?
 
-                                if (this->alsaSequencer)
+                                // send MIDI out VU levels, throttled to every 200ms.
+                                auto now = std::chrono::steady_clock::now();
+                                if (now > nextMidiOutVuSendTime_) // > std::chrono::milliseconds(500))
+                                {
+                                    nextMidiOutVuSendTime_ = now + std::chrono::milliseconds(20);
+
+                                    // send midi out for input and output volume levels.
+                                    if (this->alsaSequencer)
                                     {
                                         for (const auto &update : *updates) 
                                         {
@@ -1481,21 +1493,21 @@ public:
                                             {
                                                 // Fix 3: Calculate peak from the stereo output fields
                                                 // We use 'outputMaxValue' to see the signal level *after* the volume knob.
-                                                float linearValue = std::max(update.outputMaxValueL_, update.outputMaxValueR_);
+                                                float linearValue = 2 * std::max(update.outputMaxValueL_, update.outputMaxValueR_);
                                                 
                                                 if (linearValue > 1.0f) linearValue = 1.0f;
                                                 
                                                 // Convert to MIDI (0-127)
                                                 uint8_t midiValue = (uint8_t)(linearValue * 127.0f);
 
-                                                int channel = 0; // MIDI Ch 1
-                                                int ccNumber = isInput ? 10 : 11; // CC 10 (Input) or CC 11 (Output)
-                                                
+                                                int channel = 0;  // MIDI Ch 1
+                                                int ccNumber = isInput ? 10 : 11;  // CC 10 (Input) or CC 11 (Output)
+
                                                 this->alsaSequencer->SendControlChange(channel, ccNumber, midiValue);
                                             }
                                         }
                                     }
-
+                                }
                             }
                             else if (command == RingBufferCommand::Lv2StateChanged)
                             {

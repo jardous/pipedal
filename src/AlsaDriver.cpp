@@ -1758,6 +1758,7 @@ namespace pipedal
 
                     while (framesToRead != 0)
                     {
+                        // this->alsaSequencer->SendControlChange(0, 10, 66);
                         ReadMidiData((uint32_t)framesRead);
 
                         ssize_t thisTime = framesToRead;

@@ -282,8 +282,7 @@ namespace pipedal
 
         inPort = snd_seq_create_simple_port(seqHandle, "PiPedal:in",
                                             SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE
-                                            | SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
-                                            SND_SEQ_PORT_TYPE_MIDI_GENERIC |
+                                            | SND_SEQ_PORT_TYPE_MIDI_GENERIC,
                                             SND_SEQ_PORT_TYPE_MIDI_GM | SND_SEQ_PORT_TYPE_APPLICATION);
         if (inPort < 0)
         {
@@ -291,16 +290,16 @@ namespace pipedal
             throw std::runtime_error(SS("Failed to open ALSA sequencer:" << snd_strerror(inPort)));
         }
         CreateRealtimeInputQueue();
-/*
+
         outPort = snd_seq_create_simple_port(seqHandle, "PiPedal:out",
                                              SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
                                              SND_SEQ_PORT_TYPE_APPLICATION);
         if (outPort < 0)
         {
             // convert rc to message
-            throw std::runtime_error(SS("Failed to open ALSA sequencer:" << snd_strerror(outPort)));
+            throw std::runtime_error(SS("Failed to create MIDI out: " << snd_strerror(outPort)));
         }
-*/
+
         snd_seq_nonblock(seqHandle, 1); // Set sequencer to non-blocking mode
 
         // Get our client and port numbers for reference
@@ -420,10 +419,10 @@ namespace pipedal
 
         // 1. Set the source (this application)
         // Replace 'my_port_id' with the variable holding the port number (often just 0 or a member variable)
-        snd_seq_ev_set_source(&ev, inPort);
+        snd_seq_ev_set_source(&ev, outPort);
 
         // 2. Broadcast to anyone connected to our output (The USB Device)
-        snd_seq_ev_set_subs(&ev); 
+        snd_seq_ev_set_subs(&ev);
 
         // 3. Send immediately (don't wait for a sequencer timer)
         snd_seq_ev_set_direct(&ev);
@@ -436,7 +435,7 @@ namespace pipedal
         snd_seq_drain_output(seqHandle);
     }
 
-    void AlsaSequencerImpl::SendControlChange(int channel, int controller, int value) 
+    void AlsaSequencerImpl::SendControlChange(int channel, int controller, int value)
     {
         if (!seqHandle) return; // Safety check
 
@@ -445,10 +444,10 @@ namespace pipedal
 
         // 1. Set source to our port
         // We use 'inPort' because we configured it as a duplex port (READ/WRITE)
-        snd_seq_ev_set_source(&ev, inPort);
+        snd_seq_ev_set_source(&ev, outPort);
 
         // 2. Broadcast to subscribers (your USB device)
-        snd_seq_ev_set_subs(&ev); 
+        snd_seq_ev_set_subs(&ev);
         snd_seq_ev_set_direct(&ev); // Send immediately
 
         // 3. Construct Control Change Event
@@ -950,7 +949,7 @@ namespace pipedal
             [seqHandle, queueId]()
             {
                 snd_seq_free_queue(seqHandle, queueId);
-            }); 
+            });
 
         // Subscribe to system announcements
         snd_seq_port_subscribe_t *subscription;

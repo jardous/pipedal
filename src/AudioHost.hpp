@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <chrono>
+
 #include "JackConfiguration.hpp"
 
 #include "Lv2Pedalboard.hpp"
@@ -263,6 +265,6 @@ namespace pipedal
             int64_t instanceId,
             const std::string &pathPatchPropertyUri,
             const std::string &jsonAtom) = 0;
-    };
+   };
 
 } // namespace pipedal.

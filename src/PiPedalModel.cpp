@@ -1657,6 +1657,10 @@ void PiPedalModel::UpdateRealtimeVuSubscriptions()
 {
     std::set<int64_t> addedInstances;
 
+    // always monitor input and output volume.
+    addedInstances.insert(Pedalboard::INPUT_VOLUME_ID);
+    addedInstances.insert(Pedalboard::OUTPUT_VOLUME_ID);
+
     for (int i = 0; i < activeVuSubscriptions.size(); ++i)
     {
         auto instanceId = activeVuSubscriptions[i].instanceid;
