@@ -352,6 +352,7 @@ void Lv2Pedalboard::Prepare(IHost *pHost, Pedalboard &pedalboard, Lv2PedalboardE
     PrepareMidiMap(pedalboard);
 }
 
+//TODO
 void Lv2Pedalboard::PrepareMidiMap(const PedalboardItem &pedalboardItem)
 {
     if (pedalboardItem.midiBindings().size() != 0)
@@ -436,6 +437,9 @@ void Lv2Pedalboard::PrepareMidiMap(const PedalboardItem &pedalboardItem)
                     }
                     if (mapping.key != -1)
                     {
+                        //TODO send the MIDI mapping out
+                        //this->
+                        printf("add MIDI Mapping %s\n", binding.symbol().c_str());
                         midiMappings.push_back(std::move(mapping));
                     }
                 }
@@ -455,6 +459,7 @@ void Lv2Pedalboard::PrepareMidiMap(const Pedalboard &pedalboard)
 {
     for (size_t i = 0; i < pedalboard.items().size(); ++i)
     {
+        //TODO
         auto &item = pedalboard.items()[i];
         PrepareMidiMap(item);
     }

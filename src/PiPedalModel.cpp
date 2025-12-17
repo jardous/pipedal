@@ -636,6 +636,7 @@ void PiPedalModel::UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalbo
 
         // apply the error messages to the lv2Pedalboard.
         // return true if the error messages have changed
+        printf("XXXXXX Update current pedalboard\n");
         audioHost->SetPedalboard(lv2Pedalboard);
         this->pedalboard = pedalboard;
         previousPedalboard = this->pedalboard;
@@ -1384,7 +1385,7 @@ void PiPedalModel::RestartAudio(bool useDummyAudioDriver)
         // Still bugs wrt/ restarting the circular buffers for the audio thread.
 
         // do a complete reload.
-
+        printf("XXXXXX restarting audio\n");
         this->audioHost->SetPedalboard(nullptr);
 
         previousPedalboardLoaded = false;

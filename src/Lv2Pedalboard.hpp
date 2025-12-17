@@ -160,6 +160,7 @@ namespace pipedal
 
         std::vector<float *> &GetInputBuffers() { return this->pedalboardInputBuffers; }
         std::vector<float *> &GetoutputBuffers() { return this->pedalboardOutputBuffers; }
+        const std::vector<MidiMapping> &GetMidiMappings() const { return this->midiMappings; }
 
         int GetControlIndex(uint64_t instanceId, const std::string &symbol);
         void SetControlValue(int effectIndex, int portIndex, float value);

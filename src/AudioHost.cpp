@@ -60,6 +60,7 @@ using namespace pipedal;
 #include <fstream>
 #include "Lv2EventBufferWriter.hpp"
 #include "InheritPriorityMutex.hpp"
+#include "MidiBinding.hpp"
 #include <atomic>
 
 #ifdef __linux__
@@ -1102,6 +1103,7 @@ private:
             }
         }
     }
+    //TODO
     void ProcessMidiInput()
     {
         Lv2EventBufferWriter eventBufferWriter(this->eventBufferUrids);
@@ -1350,6 +1352,8 @@ public:
 
             // next time we can send MIDI VU levels.
             std::chrono::steady_clock::time_point nextMidiOutVuSendTime_ = std::chrono::steady_clock::now();
+            uint8_t lastInputVuMidiValue = 0;
+            uint8_t lastOutputVuMidiValue = 0;
 
             while (true)
             {
@@ -1473,37 +1477,48 @@ public:
                                 }
                                 this->hostWriter.AckVuUpdate(); // please sir, can I have some more?
 
-                                // send MIDI out VU levels, throttled to every 200ms.
+                                // send MIDI out VU levels, throttled to every 1000ms.
                                 auto now = std::chrono::steady_clock::now();
                                 if (now > nextMidiOutVuSendTime_) // > std::chrono::milliseconds(500))
                                 {
-                                    nextMidiOutVuSendTime_ = now + std::chrono::milliseconds(20);
+                                    nextMidiOutVuSendTime_ = now + std::chrono::milliseconds(1000);
 
                                     // send midi out for input and output volume levels.
                                     if (this->alsaSequencer)
                                     {
-                                        for (const auto &update : *updates) 
+                                        for (const auto &update : *updates)
                                         {
-                                            // Fix 1: Use instanceId_ (with underscore)
-                                            // Fix 2: Use the constants from Pedalboard class
-                                            bool isInput = (update.instanceId_ == Pedalboard::INPUT_VOLUME_ID); 
-                                            bool isOutput = (update.instanceId_ == Pedalboard::OUTPUT_VOLUME_ID);
-
-                                            if (isInput || isOutput)
+                                            int channel = 0;  // MIDI Ch 1
+                                            // CC 10 (Input) or CC 11 (Output)
+                                            if (update.instanceId_ == Pedalboard::INPUT_VOLUME_ID)
                                             {
-                                                // Fix 3: Calculate peak from the stereo output fields
-                                                // We use 'outputMaxValue' to see the signal level *after* the volume knob.
-                                                float linearValue = 2 * std::max(update.outputMaxValueL_, update.outputMaxValueR_);
-                                                
+                                                // Calculate peak from the stereo output fields
+                                                float linearValue = 2 * std::max(update.inputMaxValueL_, update.inputMaxValueR_);
+
                                                 if (linearValue > 1.0f) linearValue = 1.0f;
-                                                
+
                                                 // Convert to MIDI (0-127)
                                                 uint8_t midiValue = (uint8_t)(linearValue * 127.0f);
 
-                                                int channel = 0;  // MIDI Ch 1
-                                                int ccNumber = isInput ? 10 : 11;  // CC 10 (Input) or CC 11 (Output)
+                                                if (midiValue != lastInputVuMidiValue) {
+                                                    this->alsaSequencer->SendControlChange(channel, 10, midiValue);
+                                                    lastInputVuMidiValue = midiValue;
+                                                }
+                                            }
+                                            if (update.instanceId_ == Pedalboard::OUTPUT_VOLUME_ID)
+                                            {
+                                                // Calculate peak from the stereo output fields
+                                                float linearValue = 2 * std::max(update.outputMaxValueL_, update.outputMaxValueR_);
 
-                                                this->alsaSequencer->SendControlChange(channel, ccNumber, midiValue);
+                                                if (linearValue > 1.0f) linearValue = 1.0f;
+
+                                                // Convert to MIDI (0-127)
+                                                uint8_t midiValue = (uint8_t)(linearValue * 127.0f);
+
+                                                if (midiValue != lastOutputVuMidiValue) {
+                                                    this->alsaSequencer->SendControlChange(channel, 11, midiValue);
+                                                    lastOutputVuMidiValue = midiValue;
+                                                }
                                             }
                                         }
                                     }
@@ -1817,6 +1832,36 @@ public:
             pedalboard->Activate();
             this->activePedalboards.push_back(pedalboard);
             hostWriter.ReplaceEffect(pedalboard.get());
+        }
+
+        if (pedalboard == nullptr) {
+            printf("  -- empty pedalboard\n");
+            return;
+        }
+
+        //printf("##### --- %s\n", pedalboard);
+        const auto& midiMappings = pedalboard->GetMidiMappings();
+        printf("### number of midi mappings %d\n", midiMappings.size());
+        for (const auto& mapping : midiMappings)
+        {
+            //MidiControlType type = mapping.mappingType;
+            const MidiBinding& binding = mapping.midiBinding;
+
+            //printf("##### %s\n", binding.symbol().c_str());
+            printf("##### mapping key %d\n", mapping.key);
+
+            switch (binding.bindingType()) {
+                case BINDING_TYPE_NONE:
+                    break;
+                case BINDING_TYPE_NOTE:
+                    this->alsaSequencer->SendControlChange(0, 66, 1);
+                    break;
+                case BINDING_TYPE_CONTROL:
+                    this->alsaSequencer->SendControlChange(0, 67, 2);
+                default:
+                    break;
+            }
+
         }
     }
 
