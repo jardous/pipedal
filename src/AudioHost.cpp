@@ -20,6 +20,7 @@
 
 #include "AudioHost.hpp"
 #include "IEffect.hpp"
+#include "StateInterface.hpp"
 #include "util.hpp"
 #include <lv2/atom/atom.h>
 #include "SchedulerPriority.hpp"
@@ -1480,13 +1481,13 @@ public:
 
 
 
-                                // send MIDI out VU levels, throttled to every 1000ms.
+                                // send MIDI out VU levels, throttled
                                 auto now = std::chrono::steady_clock::now();
                                 if (now > nextMidiOutVuSendTime_)
                                 {
                                     nextMidiOutVuSendTime_ = now + std::chrono::milliseconds(100);
 
-                                    // send midi out for input and output volume levels.
+                                    // send midi out for input and output volume levels
                                     if (this->alsaSequencer)
                                     {
                                         for (const auto &update : *updates)
@@ -1526,7 +1527,6 @@ public:
                                         }
                                     }
                                 }
-
 
 
                             }
@@ -1855,7 +1855,7 @@ public:
             
             Lv2Effect *lv2Effect = (Lv2Effect *)effect;
 
-            bool effectEnabled = !lv2Effect->isBypass();
+            bool effectEnabled = lv2Effect->isBypass();
 
             switch (binding.bindingType()) {
                 case BINDING_TYPE_NONE:

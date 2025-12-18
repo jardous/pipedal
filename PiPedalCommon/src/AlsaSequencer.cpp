@@ -75,8 +75,7 @@ namespace pipedal
 
                 snd_seq_event_t ev;
                 snd_seq_ev_clear(&ev);
-
-                snd_seq_ev_set_source(&ev, outPort);
+                snd_seq_ev_set_source(&ev, seqPort);
                 snd_seq_ev_set_subs(&ev);
                 snd_seq_ev_set_direct(&ev); // Send immediately
                 snd_seq_ev_set_noteon(&ev, channel, note, velocity);
@@ -90,7 +89,7 @@ namespace pipedal
 
                 snd_seq_event_t ev;
                 snd_seq_ev_clear(&ev);
-                snd_seq_ev_set_source(&ev, outPort);
+                snd_seq_ev_set_source(&ev, seqPort);
                 snd_seq_ev_set_subs(&ev);
                 snd_seq_ev_set_direct(&ev); // Send immediately
                 snd_seq_ev_set_noteoff(&ev, channel, note, velocity);
@@ -104,7 +103,7 @@ namespace pipedal
             virtual void RemoveAllConnections() override;
 
         private:
-            void ModifyConnection(int clientId, int portId, ConnectAction action);
+            void ModifyConnection(int srcClientId, int SrcPortId, int destClientId, int destPortId, ConnectAction action);
 
             // Get the current queue ID (returns -1 if no queue is active)
             int GetQueueId() const { return queueId; }
@@ -125,8 +124,7 @@ namespace pipedal
             std::vector<Connection> connections;
             std::vector<struct pollfd> pollFds; // For polling input events
             snd_seq_t *seqHandle = nullptr;
-            int inPort = -1;
-            int outPort = -1;
+            int seqPort = -1;
             int queueId = -1; // Queue for real-time timestamps
         };
 
@@ -141,7 +139,7 @@ namespace pipedal
             virtual void StopMonitoring() override;
 
         private:
-            int CreateInputQueue(snd_seq_t *seqHandle, int inPort);
+            int CreateInputQueue(snd_seq_t *seqHandle, int seqPort);
 
             bool started = false;
             void ServiceProc();
@@ -310,25 +308,17 @@ namespace pipedal
         }
         snd_seq_set_client_name(seqHandle, "PiPedal");
 
-        inPort = snd_seq_create_simple_port(seqHandle, "PiPedal:in",
+
+        seqPort = snd_seq_create_simple_port(seqHandle, "PiPedal",
                                             SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE
-                                            | SND_SEQ_PORT_TYPE_MIDI_GENERIC,
+                                            | SND_SEQ_PORT_TYPE_MIDI_GENERIC
+                                            | SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
                                             SND_SEQ_PORT_TYPE_MIDI_GM | SND_SEQ_PORT_TYPE_APPLICATION);
-        if (inPort < 0)
-        {
+        if (seqPort < 0) {
             // convert rc to message
-            throw std::runtime_error(SS("Failed to open ALSA sequencer:" << snd_strerror(inPort)));
+            throw std::runtime_error(SS("Failed to open ALSA sequencer:" << snd_strerror(seqPort)));
         }
         CreateRealtimeInputQueue();
-
-        outPort = snd_seq_create_simple_port(seqHandle, "PiPedal:out",
-                                             SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
-                                             SND_SEQ_PORT_TYPE_APPLICATION);
-        if (outPort < 0)
-        {
-            // convert rc to message
-            throw std::runtime_error(SS("Failed to create MIDI out: " << snd_strerror(outPort)));
-        }
 
         snd_seq_nonblock(seqHandle, 1); // Set sequencer to non-blocking mode
 
@@ -344,7 +334,9 @@ namespace pipedal
         while (connections.size() != 0)
         {
             auto connection = connections.back();
-            ModifyConnection(connection.clientId, connection.portId, ConnectAction::Unsubscribe);
+            ModifyConnection(connection.clientId, connection.portId,
+                             myClientId, 0,
+                             ConnectAction::Unsubscribe);
         }
     }
     AlsaSequencerImpl::~AlsaSequencerImpl()
@@ -356,10 +348,10 @@ namespace pipedal
             snd_seq_free_queue(seqHandle, queueId);
             queueId = -1;
         }
-        if (inPort >= 0)
+        if (seqPort >= 0)
         {
-            snd_seq_delete_port(seqHandle, inPort);
-            inPort = -1;
+            snd_seq_delete_port(seqHandle, seqPort);
+            seqPort = -1;
         }
         if (seqHandle)
         {
@@ -371,7 +363,8 @@ namespace pipedal
 
     void AlsaSequencerImpl::ConnectPort(int clientId, int portId)
     {
-        ModifyConnection(clientId, portId, ConnectAction::Subscribe);
+        ModifyConnection(clientId, portId, myClientId, 0, ConnectAction::Subscribe);
+        ModifyConnection(myClientId, 0, clientId, portId,  ConnectAction::Subscribe);
     }
 
     void AlsaSequencerImpl::ConnectPort(const std::string &id)
@@ -382,11 +375,13 @@ namespace pipedal
             if (port.id == id)
             {
                 ConnectPort(port.client, port.port);
+                //ConnectPort(port.port, port.client);
                 return;
             }
         }
         throw std::runtime_error("ALSA port not found");
     }
+
     void AlsaSequencerImpl::SetConfiguration(const AlsaSequencerConfiguration &alsaSequencerConfiguration)
     {
         this->RemoveAllConnections(); // Currently no configuration options to set
@@ -401,6 +396,7 @@ namespace pipedal
                 if (port.id == id)
                 {
                     ConnectPort(port.client, port.port);
+                    // ConnectPort(port.port, port.client);
                     break;
                 }
             }
@@ -443,50 +439,27 @@ namespace pipedal
 
     void AlsaSequencerImpl::SendProgramChange(int channel, int program)
     {
-        if (!seqHandle) return; // Safety check
+        if (!seqHandle) return;  // Safety check
+ 
         snd_seq_event_t ev;
         snd_seq_ev_clear(&ev);
-
-        // 1. Set the source (this application)
-        // Replace 'my_port_id' with the variable holding the port number (often just 0 or a member variable)
-        snd_seq_ev_set_source(&ev, outPort);
-
-        // 2. Broadcast to anyone connected to our output (The USB Device)
+        snd_seq_ev_set_source(&ev, seqPort);
         snd_seq_ev_set_subs(&ev);
-
-        // 3. Send immediately (don't wait for a sequencer timer)
         snd_seq_ev_set_direct(&ev);
-
-        // 4. Construct the Program Change Event
         snd_seq_ev_set_pgmchange(&ev, channel, program);
-
-        // 5. Push it out
         snd_seq_event_output(seqHandle, &ev);
         snd_seq_drain_output(seqHandle);
     }
 
     void AlsaSequencerImpl::SendControlChange(int channel, int controller, int value)
     {
-        if (!seqHandle) return; // Safety check
+        if (!seqHandle) return;  // Safety check
 
         snd_seq_event_t ev;
         snd_seq_ev_clear(&ev);
-
-        // 1. Set source to our port
-        // We use 'inPort' because we configured it as a duplex port (READ/WRITE)
-        snd_seq_ev_set_source(&ev, outPort);
-
-        // 2. Broadcast to subscribers (your USB device)
         snd_seq_ev_set_subs(&ev);
-        snd_seq_ev_set_direct(&ev); // Send immediately
-
-        // 3. Construct Control Change Event
-        // channel: 0-15
-        // controller: 0-127 (e.g. 7 for Volume)
-        // value: 0-127
+        snd_seq_ev_set_direct(&ev);  // Send immediately
         snd_seq_ev_set_controller(&ev, channel, controller, value);
-
-        // 4. Output
         snd_seq_event_output(seqHandle, &ev);
         snd_seq_drain_output(seqHandle);
     }
@@ -777,7 +750,7 @@ namespace pipedal
             snd_seq_port_info_t *port_info;
             snd_seq_port_info_alloca(&port_info);
 
-            rc = snd_seq_get_port_info(seqHandle, inPort, port_info);
+            rc = snd_seq_get_port_info(seqHandle, seqPort, port_info);
             if (rc < 0)
             {
                 snd_seq_free_queue(seqHandle, queueId);
@@ -790,7 +763,7 @@ namespace pipedal
             snd_seq_port_info_set_timestamp_real(port_info, 1);
             snd_seq_port_info_set_timestamp_queue(port_info, queueId);
 
-            rc = snd_seq_set_port_info(seqHandle, inPort, port_info);
+            rc = snd_seq_set_port_info(seqHandle, seqPort, port_info);
             if (rc < 0)
             {
                 snd_seq_free_queue(seqHandle, queueId);
@@ -838,7 +811,7 @@ namespace pipedal
         return {};
     }
 
-    void AlsaSequencerImpl::ModifyConnection(int clientId, int portId, ConnectAction action)
+    void AlsaSequencerImpl::ModifyConnection(int srcClientId, int srcPortId, int destClientId, int destPortId, ConnectAction action)
     {
         std::lock_guard<std::mutex> lock(connectionsMutex);
 
@@ -853,10 +826,15 @@ namespace pipedal
 
 
         snd_seq_addr_t sender, dest;
-        dest.client = myClientId;
-        dest.port = 0;
-        sender.client = clientId;
-        sender.port = portId;
+        //dest.client = myClientId;
+        // dest.port = 0;
+        // sender.client = clientId;
+        // sender.port = portId;
+        //
+        dest.client = destClientId;
+        dest.port = destPortId;
+        sender.client = srcClientId;
+        sender.port = srcPortId;
 
         snd_seq_port_subscribe_t *subs;
         int queue = this->queueId;
@@ -873,8 +851,8 @@ namespace pipedal
             {
                 Lv2Log::warning(
                     "Failed to disconnect ALSA sequencer port %d:%d. Subscripton not found.",
-                    (int)clientId,
-                    (int)portId);
+                    (int)srcClientId,
+                    (int)srcPortId);
             }
             else
             {
@@ -883,36 +861,37 @@ namespace pipedal
                 {
                     Lv2Log::warning(
                         "Failed to disconnect ALSA sequencer port %d:%d. (%s)",
-                        (int)clientId,
-                        (int)portId,
+                        (int)srcClientId,
+                        (int)srcPortId,
                         snd_strerror(rc));
                 }
             }
             for (auto it = this->connections.begin(); it != this->connections.end(); ++it)
             {
-                if (it->clientId == clientId && it->portId == portId)
+                if (it->clientId == srcClientId && it->portId == srcPortId)
                 {
                     it = this->connections.erase(it);
                     break;
                 }
             }
         }
-        else
+        else  // Subscribe
         {
+            printf("Subscribing to ALSA sequencer port %d:%d\n", (int)srcClientId, (int)srcPortId);
             if (snd_seq_get_port_subscription(seq, subs) == 0)
             {
-                Lv2Log::warning("ALSA sequencer port  %d:%d is already subscribed.", (int)clientId, (int)portId);
+                Lv2Log::warning("ALSA sequencer port  %d:%d is already subscribed.", (int)srcClientId, (int)srcPortId);
                 return;
             }
             int rc = snd_seq_subscribe_port(seq, subs);
             if (rc < 0)
             {
                 Lv2Log::error("Failed to connect ALSA sequencer port %d:%d. (%s)",
-                              (int)clientId, (int)portId,
+                              (int)srcClientId, (int)srcPortId,
                               snd_strerror(rc));
                 return;
             }
-            this->connections.push_back({clientId, portId});
+            this->connections.push_back({srcClientId, srcPortId});
         }
     }
 
