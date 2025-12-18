@@ -384,6 +384,10 @@ namespace pipedal
 
         }
 
+        virtual bool isBypass() {
+            return this->bypass;
+        } 
+
         virtual void Activate();
         virtual void Run(uint32_t samples, RealtimeRingBufferWriter *realtimeRingBufferWriter);
         virtual void RunWithBufferStaging(uint32_t samples, RealtimeRingBufferWriter *realtimeRingBufferWriter);

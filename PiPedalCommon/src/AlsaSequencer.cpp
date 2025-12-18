@@ -50,6 +50,7 @@ namespace pipedal
             Unsubscribe
         };
 
+
         class AlsaSequencerImpl : public AlsaSequencer
         {
         public:
@@ -67,6 +68,35 @@ namespace pipedal
             virtual bool ReadMessage(AlsaMidiMessage &message, int timeoutMs = -1) override;
             virtual void SendProgramChange(int channel, int program);
             virtual void SendControlChange(int channel, int controller, int value) override;
+            virtual void SendNoteOn(int channel, int note, int velocity) override
+            {
+                if (!seqHandle)
+                    return;  // Safety check
+
+                snd_seq_event_t ev;
+                snd_seq_ev_clear(&ev);
+
+                snd_seq_ev_set_source(&ev, outPort);
+                snd_seq_ev_set_subs(&ev);
+                snd_seq_ev_set_direct(&ev); // Send immediately
+                snd_seq_ev_set_noteon(&ev, channel, note, velocity);
+                snd_seq_event_output(seqHandle, &ev);
+                snd_seq_drain_output(seqHandle);
+            }
+            virtual void SendNoteOff(int channel, int note, int velocity) override
+            {
+                if (!seqHandle)
+                    return;  // Safety check
+
+                snd_seq_event_t ev;
+                snd_seq_ev_clear(&ev);
+                snd_seq_ev_set_source(&ev, outPort);
+                snd_seq_ev_set_subs(&ev);
+                snd_seq_ev_set_direct(&ev); // Send immediately
+                snd_seq_ev_set_noteoff(&ev, channel, note, velocity);
+                snd_seq_event_output(seqHandle, &ev);
+                snd_seq_drain_output(seqHandle);
+            }
 
             // Get current real-time from the queue (useful for calculating precise timing)
             virtual bool GetQueueRealtime(uint64_t *sec, uint32_t *nsec) override;

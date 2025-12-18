@@ -328,6 +328,8 @@ namespace pipedal
 
         virtual void SendProgramChange(int channel, int program) = 0;
         virtual void SendControlChange(int channel, int controller, int value) = 0;
+        virtual void SendNoteOn(int channel, int note, int velocity) = 0;
+        virtual void SendNoteOff(int channel, int note, int velocity) = 0;
 
         // currently non-functional
         virtual bool GetQueueRealtime(uint64_t *sec, uint32_t *nsec) = 0;

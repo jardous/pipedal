@@ -19,6 +19,7 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "AudioHost.hpp"
+#include "IEffect.hpp"
 #include "util.hpp"
 #include <lv2/atom/atom.h>
 #include "SchedulerPriority.hpp"
@@ -1477,11 +1478,13 @@ public:
                                 }
                                 this->hostWriter.AckVuUpdate(); // please sir, can I have some more?
 
+
+
                                 // send MIDI out VU levels, throttled to every 1000ms.
                                 auto now = std::chrono::steady_clock::now();
-                                if (now > nextMidiOutVuSendTime_) // > std::chrono::milliseconds(500))
+                                if (now > nextMidiOutVuSendTime_)
                                 {
-                                    nextMidiOutVuSendTime_ = now + std::chrono::milliseconds(1000);
+                                    nextMidiOutVuSendTime_ = now + std::chrono::milliseconds(100);
 
                                     // send midi out for input and output volume levels.
                                     if (this->alsaSequencer)
@@ -1523,6 +1526,9 @@ public:
                                         }
                                     }
                                 }
+
+
+
                             }
                             else if (command == RingBufferCommand::Lv2StateChanged)
                             {
@@ -1835,33 +1841,36 @@ public:
         }
 
         if (pedalboard == nullptr) {
-            printf("  -- empty pedalboard\n");
             return;
         }
 
-        //printf("##### --- %s\n", pedalboard);
+        // send midi note on/off for bypass if mapped
         const auto& midiMappings = pedalboard->GetMidiMappings();
-        printf("### number of midi mappings %d\n", midiMappings.size());
         for (const auto& mapping : midiMappings)
         {
-            //MidiControlType type = mapping.mappingType;
             const MidiBinding& binding = mapping.midiBinding;
 
-            //printf("##### %s\n", binding.symbol().c_str());
-            printf("##### mapping key %d\n", mapping.key);
+            IEffect* effect = pedalboard->GetEffect(mapping.instanceId);
+            if (!effect && !effect->IsLv2Effect()) continue;
+            
+            Lv2Effect *lv2Effect = (Lv2Effect *)effect;
+
+            bool effectEnabled = !lv2Effect->isBypass();
 
             switch (binding.bindingType()) {
                 case BINDING_TYPE_NONE:
                     break;
                 case BINDING_TYPE_NOTE:
-                    this->alsaSequencer->SendControlChange(0, 66, 1);
+                    if (effectEnabled)
+                        this->alsaSequencer->SendNoteOn(0, binding.note(), 100);
+                    else
+                        this->alsaSequencer->SendNoteOff(0, binding.note(), 0);
                     break;
                 case BINDING_TYPE_CONTROL:
-                    this->alsaSequencer->SendControlChange(0, 67, 2);
+                    break;
                 default:
                     break;
             }
-
         }
     }
 
@@ -1870,11 +1879,35 @@ public:
         std::lock_guard guard(mutex);
         if (active && this->currentPedalboard)
         {
-            // use indices not instance ids, so we can just do a straight array index on the audio thread.
+            // use indices not instance ids, so we can just do a straight array index on the audio thread
             auto index = currentPedalboard->GetIndexOfInstanceId(instanceId);
             if (index >= 0)
             {
                 hostWriter.SetBypass((uint32_t)index, enabled);
+            }
+
+            // send midi note on/off for bypass if mapped
+            const auto& midiMappings = currentPedalboard->GetMidiMappings();
+            for (const auto& mapping : midiMappings) {
+                if (mapping.instanceId != instanceId) {
+                    continue;
+                }
+
+                const MidiBinding& binding = mapping.midiBinding;
+                switch (binding.bindingType()) {
+                    case BINDING_TYPE_NONE:
+                        break;
+                    case BINDING_TYPE_NOTE:
+                        if (enabled)
+                            this->alsaSequencer->SendNoteOn(0, binding.note(), 100);
+                        else
+                            this->alsaSequencer->SendNoteOff(0, binding.note(), 0);
+                        break;
+                    case BINDING_TYPE_CONTROL:
+                        break;
+                    default:
+                        break;
+                }
             }
         }
     }
